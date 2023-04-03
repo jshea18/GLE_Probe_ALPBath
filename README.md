@@ -1,6 +1,6 @@
 # Passive colloid in an active bath
 
-This module supplies all the code necessary to simulate a passive colloid in an active bath.
+This module supplies all the code necessary to simulate a passive colloid in an active bath. Test.
 
 # Structure of this module
 
