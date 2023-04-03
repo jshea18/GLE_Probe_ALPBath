@@ -1,0 +1,167 @@
+# LAMMPS input script for colloid diffusion
+# calculates time correlation functions and memory function
+
+##############################
+# set input values
+##############################
+
+# box
+variable	box_size equal 30
+variable	box_size_x equal 3*${box_size}
+
+# system paramter
+variable        T equal 1.0
+variable	rho_solvent equal RHO
+variable 	dt equal 0.001
+variable	eta equal 1
+
+# colloid
+variable	R equal RAD
+variable	M equal ${R}*${R}*${R}*100/27
+variable	m equal ${M}/200
+
+# ALPs
+variable	Ralp equal 0.5
+variable	Dalp equal 2*${Ralp}
+
+# lj
+variable	rcut_lj equal 1.12246
+
+# external Force
+variable Fext equal FEXT
+
+# activity
+variable 	Fact equal FACT
+
+# simulation
+variable	eq_steps equal 5000000
+variable	sim_steps equal 20000000 #50000000
+
+
+##############################
+# calculate system variables
+##############################
+
+variable	gamma_solvent equal 6*PI*${eta}*${Ralp}
+variable 	D_solvent equal ${T}/${gamma_solvent}
+variable 	tau_solvent equal 1/${gamma_solvent}
+variable	gamma_tracer equal 6*PI*${eta}*${R}
+variable 	tau_tracer equal ${M}/${gamma_tracer}
+
+##############################
+# system setup
+##############################
+
+# lj 3d solvent
+units		lj
+dimension	3
+atom_style	hybrid sphere dipole
+atom_modify     map yes
+timestep	${dt}
+
+# create lattice (to place particles), simulation box
+lattice         fcc ${rho_solvent}
+region          simbox block 0 ${box_size_x} 0 ${box_size} 0 ${box_size}
+boundary 	p p p
+create_box      2 simbox
+
+# create particles
+# solvent
+create_atoms	1 box
+group		solvent type 1
+region 		sphere sphere 10.0 10.0 10.0 5.0 units box
+delete_atoms	region sphere
+
+# colloid
+create_atoms    2 single/sphere 10.0 10.0 10.0 $R 200 units box
+group		col type 2
+
+# initialize particles
+set 		type 1 mass 1.0 diameter ${Dalp} dipole/random RAN1 1.0
+set 		type 2 mass ${m} diameter 0.0
+
+variable  Fextcol equal ${Fext}/count(col)
+variable  Fextsol equal -${Fext}/count(solvent)
+
+##############################
+# interactions
+##############################
+
+pair_style      lj/cut ${rcut_lj}
+pair_coeff	1 1 1.0 1.0
+pair_coeff	1 2 1.0 1.0 1.12246
+pair_coeff	2 2 1.0 1.0 1.12246
+
+# include activity
+fix		4 solvent addactivity style ABP ${Fact} ${D_solvent} RAN2
+
+##############################
+# equilibration
+##############################
+
+# assign random velcities velocities
+velocity        all create $T RAN3
+
+fix		1 solvent nve/sphere update dipole
+fix 		2 col rigid/nve group 1 col
+fix		3 solvent langevin $T $T ${tau_solvent} RAN4
+
+unfix		2
+fix 		5 col addforce ${Fextcol} 0.0 0.0
+fix 		6 solvent addforce ${Fextsol} 0.0 0.0
+
+fix		2 col rigid/nve group 1 col
+
+thermo          100
+run 		${eq_steps}
+reset_timestep  0
+
+##############################
+# define on-the-fly calculations
+##############################
+
+variable fx equal f_2[1][7]
+variable fy equal f_2[1][8]
+variable fz equal f_2[1][9]
+variable vx equal vcm(col,x)
+variable vy equal vcm(col,y)
+variable vz equal vcm(col,z)
+variable x equal xcm(col,x)
+variable y equal xcm(col,y)
+variable z equal xcm(col,z)
+
+variable alp_x equal x[218]
+variable alp_y equal y[218]
+variable alp_z equal z[218]
+variable alp_vx equal vx[218]
+variable alp_vy equal vy[218]
+variable alp_vz equal vz[218]
+variable alp_fx equal fx[218]
+variable alp_fy equal fy[218]
+variable alp_fz equal fz[218]
+variable alp_type equal type[218]
+
+compute bath_temp solvent temp
+variable alp_temp equal c_bath_temp
+compute coll_temp col temp
+variable coll_temp equal c_coll_temp
+
+fix 7 all print 1  "${x} ${y} ${z} ${vx} ${vy} ${vz} ${fx} ${fy} ${fz}" file colloid.dat screen no
+fix 8 all print 1  "${alp_x} ${alp_y} ${alp_z} ${alp_vx} ${alp_vy} ${alp_vz} ${alp_fx} ${alp_fy} ${alp_fz}" file alp.dat screen no
+fix 9 all print 100000  "${alp_type}" file verify_alp.dat screen no
+fix 10 col cdf 100000 100 10 100 10 solvent file data_radial_function.dat
+fix 11 col sphericalharmonics solvent 10000 ${sim_steps} shells 100 10 style velocity lvals 13 0 1 2 3 4 5 6 7 8 9 10 11 12 file data_spherical_harmonics.dat
+fix 12 col sphericalharmonics solvent 10000 ${sim_steps} shells 100 10 style pullx lvals 13 0 1 2 3 4 5 6 7 8 9 10 11 12 file data_spherical_harmonics_pullx.dat
+fix 13 all print 100 "${coll_temp} ${alp_temp}" file temp.dat screen no
+
+##############################
+# production run
+##############################
+
+thermo          1000
+run	        ${sim_steps}
+
+##############################
+# write restart
+##############################
+write_restart restart.colloid.*

@@ -1,0 +1,91 @@
+# LAMMPS input script for colloid diffusion
+# calculates time correlation functions and memory function
+
+##############################
+# set input values
+##############################
+
+# box
+variable	box_size equal 20
+
+# system paramter
+variable        T equal 1.0
+variable	rho_solvent equal 0.3
+variable 	dt equal 0.001
+variable	eta equal 1
+
+# ALPs
+variable	Ralp equal 0.5
+variable	Dalp equal 2*${Ralp}
+
+# lj
+variable	rcut_lj equal 1.12246
+
+# activity
+variable 	Fact equal FACT
+
+# simulation
+variable	eq_steps equal 500000
+
+
+##############################
+# calculate system variables
+##############################
+
+variable	gamma_solvent equal 6*PI*${eta}*${Ralp}
+variable 	D_solvent equal ${T}/${gamma_solvent}
+variable 	tau_solvent equal 1/${gamma_solvent}
+
+##############################
+# system setup
+##############################
+
+# lj 3d solvent
+units		lj
+dimension	3
+atom_style	hybrid sphere dipole
+atom_modify     map yes
+timestep	${dt}
+
+# create lattice (to place particles), simulation box
+lattice         fcc ${rho_solvent}
+region          simbox block 0 ${box_size} 0 ${box_size} 0 ${box_size}
+boundary 	p p p
+create_box      1 simbox
+
+#ALP
+create_atoms    1 single 10.0 10.0 10.0 
+group		col type 1
+
+# initialize particles
+set 		type 1 mass 1.0 diameter ${Dalp} dipole/random RAN1 1.0
+
+##############################
+# interactions
+##############################
+
+pair_style      lj/cut ${rcut_lj}
+pair_coeff	1 1 1.0 1.0
+
+# include activity
+fix		4 col addactivity style ABP ${Fact} ${D_solvent} RAN2
+
+##############################
+# equilibration
+##############################
+
+# assign random velcities velocities
+velocity        all set 0 0 0
+
+fix		1 col nve/sphere update dipole
+
+fix		3 col langevin $T $T ${tau_solvent} RAN3
+fix 		mom all momentum 1 linear 1 1 1
+
+thermo          1000
+run	        ${eq_steps}
+
+##############################
+# write restart
+##############################
+write_restart restart.colloid

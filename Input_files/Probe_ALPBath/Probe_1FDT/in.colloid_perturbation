@@ -1,0 +1,100 @@
+# LAMMPS input script for colloid diffusion
+# calculates time correlation functions and memory function
+
+##############################
+# set input values
+##############################
+
+# simulation
+variable	sim_steps equal 10000
+
+variable	rho_solvent equal RHO
+
+variable	eta equal 1
+
+variable        T equal 1.0
+
+# colloid
+variable	R equal 3
+
+# ALPs
+variable	Ralp equal 0.5
+variable	Dalp equal 2*${Ralp}
+
+# lj
+variable	rcut_lj equal 1.12246
+
+# activity
+variable 	Fact equal FACT
+
+#perturbation
+variable dv equal -0.5
+
+##############################
+# calculate system variables
+##############################
+
+variable	gamma_solvent equal 6*PI*${eta}*${Ralp}
+variable 	D_solvent equal ${T}/${gamma_solvent}
+variable 	tau_solvent equal 1/${gamma_solvent}
+variable	gamma_tracer equal 6*PI*${eta}*${R}
+variable 	tau_tracer equal 100/${gamma_tracer}
+
+##############################
+# read restart script
+##############################
+
+print	"restart"
+read_restart restart.colloid
+print	"done restart"
+
+##############################
+# set properties that are not stored in restart script
+##############################
+
+pair_style      lj/cut ${rcut_lj}
+pair_coeff	1 1 1.0 1.0
+pair_coeff	1 2 1.0 1.0 1.12246
+pair_coeff	2 2 1.0 1.0 1.12246
+
+# include activity
+fix		4 solvent addactivity style ABP ${Fact} ${D_solvent} RAN1
+
+##############################
+# include perturbation
+##############################
+
+variable vx equal vcm(col,x)
+variable vy equal vcm(col,y)
+variable vz equal vcm(col,z)
+
+variable vx_dist equal ${vx}+${dv}
+
+velocity col set ${vx_dist} ${vy} ${vz}
+
+##############################
+# define on-the-fly calculations
+##############################
+
+variable fx equal f_2[1][7]
+variable fy equal f_2[1][8]
+variable fz equal f_2[1][9]
+
+variable x equal xcm(col,x)
+variable y equal xcm(col,y)
+variable z equal xcm(col,z)
+
+# integration
+fix		1 solvent nve/sphere update dipole
+fix 		2 col rigid/nve group 1 col
+fix		3 solvent langevin $T $T ${tau_solvent} RAN2
+
+
+fix 5 all print 10 "${x} ${y} ${z} ${vx} ${vy} ${vz} ${fx} ${fy} ${fz}" append colloid_perturbation.dat screen no
+
+##############################
+# production run
+##############################
+
+thermo          1000
+run	        ${sim_steps}

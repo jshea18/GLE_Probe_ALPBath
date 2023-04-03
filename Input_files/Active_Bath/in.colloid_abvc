@@ -1,0 +1,132 @@
+# LAMMPS input script for colloid diffusion
+# calculates time correlation functions and memory function
+
+##############################
+# set input values
+##############################
+
+# box
+variable	box_size equal 30
+
+# system paramter
+variable        T equal 1.0
+variable	rho_solvent equal RHO
+variable 	dt equal 0.001
+variable	eta equal 1
+
+# ALPs
+variable	Ralp equal 0.5
+variable	Dalp equal 2*${Ralp}
+
+# lj
+variable	rcut_lj equal 1.12246
+
+# activity
+variable 	Fact equal FACT
+
+# simulation
+variable	eq_steps equal 5000000
+variable	sim_steps equal 9000000
+
+
+##############################
+# calculate system variables
+##############################
+
+variable	gamma_solvent equal 6*PI*${eta}*${Ralp}
+variable 	D_solvent equal ${T}/${gamma_solvent}
+variable 	tau_solvent equal 1/${gamma_solvent}
+
+
+##############################
+# system setup
+##############################
+
+# lj 3d solvent
+units		lj
+dimension	3
+atom_style	hybrid sphere dipole
+atom_modify     map yes
+timestep	${dt}
+
+# create lattice (to place particles), simulation box
+lattice         fcc ${rho_solvent}
+region          simbox block 0 ${box_size} 0 ${box_size} 0 ${box_size}
+boundary 	p p p
+create_box      1 simbox
+
+# create particles
+# solvent
+create_atoms	1 box
+group		solvent type 1
+group		ind id 218
+group		other subtract solvent ind
+
+# initialize particles
+set 		type 1 mass 1.0 diameter ${Dalp} dipole/random RAN1 1.0
+
+##############################
+# interactions
+##############################
+
+pair_style      lj/cut ${rcut_lj}
+pair_coeff	1 1 1.0 1.0
+
+
+# include activity
+fix		3 solvent addactivity style ABP ${Fact} ${D_solvent} RAN2
+
+##############################
+# equilibration
+##############################
+
+# assign random velcities velocities
+velocity        all create $T RAN3
+
+fix		1 solvent nve/sphere update dipole
+fix		2 solvent langevin $T $T ${tau_solvent} RAN4
+fix 		mom all momentum 1 linear 1 1 1
+thermo          100
+
+run 		${eq_steps}
+unfix		mom
+reset_timestep  0
+
+##############################
+# define on-the-fly calculations
+##############################
+
+compute bath_temp solvent temp
+variable ave_temp equal c_bath_temp
+
+compute loc_dens solvent voronoi/atom
+
+variable alp_x equal x[218]
+variable alp_y equal y[218]
+variable alp_z equal z[218]
+variable alp_vx equal vx[218]
+variable alp_vy equal vy[218]
+variable alp_vz equal vz[218]
+variable alp_fx equal fx[218]
+variable alp_fy equal fy[218]
+variable alp_fz equal fz[218]
+variable alp_type equal type[218]
+
+
+fix 4 all print 1 "${alp_x} ${alp_y} ${alp_z} ${alp_vx} ${alp_vy} ${alp_vz} ${alp_fx} ${alp_fy} ${alp_fz}" file alp.dat screen no
+fix 5 all print 100000 "${alp_type}" file verify_alp.dat screen no
+fix 6 all print 1000 "${ave_temp}" file temp_alp.dat screen no
+dump voro all custom 10000 voronoi.dat c_loc_dens[*]  
+fix 7 ind velocitycorrelation other 10000 ${sim_steps} shells 100 10 style velocity lvals 13 0 1 2 3 4 5 6 7 8 9 10 11 12 grfile data_spherical_harmonics.dat vcorrfile alp_velcorr.dat
+
+##############################
+# production run
+##############################
+
+thermo          1000
+run	        ${sim_steps}
+
+##############################
+# write restart
+##############################
+write_restart restart.colloid.*

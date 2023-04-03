@@ -1,0 +1,108 @@
+# LAMMPS input script for colloid diffusion
+# calculates time correlation functions and memory function
+
+##############################
+# set input values
+##############################
+
+# box
+variable	box_size equal 20
+
+# system paramter
+variable        T equal 1.0
+variable	rho_solvent equal RHO
+variable 	dt equal 0.001
+variable	eta equal 1
+
+# colloid
+variable	R equal 3
+
+# ALPs
+variable	Ralp equal 0.5
+variable	Dalp equal 2*${Ralp}
+
+# lj
+variable	rcut_lj equal 1.12246
+
+# activity
+variable 	Fact equal FACT
+
+# simulation
+variable	eq_steps equal 500000
+
+
+##############################
+# calculate system variables
+##############################
+
+variable	gamma_solvent equal 6*PI*${eta}*${Ralp}
+variable 	D_solvent equal ${T}/${gamma_solvent}
+variable 	tau_solvent equal 1/${gamma_solvent}
+variable	gamma_tracer equal 6*PI*${eta}*${R}
+variable 	tau_tracer equal 100/${gamma_tracer}
+
+
+##############################
+# system setup
+##############################
+
+# lj 3d solvent
+units		lj
+dimension	3
+atom_style	hybrid sphere dipole
+atom_modify     map yes
+timestep	${dt}
+
+# create lattice (to place particles), simulation box
+lattice         fcc ${rho_solvent}
+region          simbox block 0 ${box_size} 0 ${box_size} 0 ${box_size}
+boundary 	p p p
+create_box      2 simbox
+
+# create particles
+# solvent
+create_atoms	1 box
+group		solvent type 1
+region 		sphere sphere 10.0 10.0 10.0 5.0 units box
+delete_atoms	region sphere
+
+# colloid
+create_atoms    2 single/sphere 10.0 10.0 10.0 $R 200 units box
+group		col type 2
+
+# initialize particles
+set 		type 1 mass 1.0 diameter ${Dalp} dipole/random RAN1 1.0
+set 		type 2 mass 0.5 diameter 0.0
+
+##############################
+# interactions
+##############################
+
+pair_style      lj/cut ${rcut_lj}
+pair_coeff	1 1 1.0 1.0
+pair_coeff	1 2 1.0 1.0 1.12246
+pair_coeff	2 2 1.0 1.0 1.12246
+
+
+# include activity
+fix		4 solvent addactivity style ABP ${Fact} ${D_solvent} RAN2
+
+##############################
+# equilibration
+##############################
+
+# assign random velcities velocities
+velocity        all create $T RAN3
+
+fix		1 solvent nve/sphere update dipole
+fix 		2 col rigid/nve group 1 col
+fix		3 solvent langevin $T $T ${tau_solvent} RAN4
+fix 		mom all momentum 1 linear 1 1 1
+
+thermo          1000
+run	        ${eq_steps}
+
+##############################
+# write restart
+##############################
+write_restart restart.colloid

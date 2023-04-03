@@ -1,0 +1,84 @@
+# LAMMPS input script for colloid diffusion
+# calculates time correlation functions and memory function
+
+##############################
+# set input values
+##############################
+
+# simulation
+variable	sim_steps equal 10000
+
+variable	rho_solvent equal 0.3
+
+variable	eta equal 1
+
+variable        T equal 1.0
+
+# ALPs
+variable	Ralp equal 0.5
+variable	Dalp equal 2*${Ralp}
+
+# lj
+variable	rcut_lj equal 1.12246
+
+# activity
+variable 	Fact equal FACT
+
+##############################
+# calculate system variables
+##############################
+
+variable	gamma_solvent equal 6*PI*${eta}*${Ralp}
+variable 	D_solvent equal ${T}/${gamma_solvent}
+variable 	tau_solvent equal 1/${gamma_solvent}
+
+##############################
+# read restart script
+##############################
+
+print	"restart"
+read_restart restart.colloid
+print	"done restart"
+
+##############################
+# set properties that are not stored in restart script
+##############################
+
+pair_style      lj/cut ${rcut_lj}
+pair_coeff	1 1 1.0 1.0
+
+# include activity
+fix		4 col addactivity style ABP ${Fact} ${D_solvent} RAN1
+
+##############################
+# define on-the-fly calculations
+##############################
+
+variable fx equal fcm(col,x)
+variable fy equal fcm(col,y)
+variable fz equal fcm(col,z)
+variable vx equal vcm(col,x)
+variable vy equal vcm(col,y)
+variable vz equal vcm(col,z)
+variable x equal xcm(col,x)
+variable y equal xcm(col,y)
+variable z equal xcm(col,z)
+
+# integration
+fix		1 col nve/sphere update dipole
+
+fix		3 col langevin $T $T ${tau_solvent} RAN2
+
+fix 5 all print 10 "${x} ${y} ${z} ${vx} ${vy} ${vz} ${fx} ${fy} ${fz}" append colloid.dat screen no title ""
+
+##############################
+# production run
+##############################
+
+thermo          1000
+run	        ${sim_steps}
+
+##############################
+# write restart
+##############################
+write_restart restart.colloid
